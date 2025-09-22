@@ -19,7 +19,7 @@ def iniciar_servidor():
 
             try:
                 tamanho_maximo = dados.split('Tamanho máximo: ')[1].split(' ')[0]
-                resposta = f"Handshake OK. Modo: operação padrão, Tamanho máximo: {tamanho_maximo} caracteres"
+                resposta = f"Handshake OK. Modo de Operação: Modo seguro, Tamanho máximo: {tamanho_maximo} caracteres"
             except IndexError:
                 resposta = "Erro: Formato de mensagem do cliente inválido."
 

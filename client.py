@@ -24,7 +24,7 @@ def iniciar_cliente():
             except ValueError:
                 print("Entrada inválida. Por favor, digite um número.")
         
-        dados_para_enviar = f"Modo: operação padrão, Tamanho máximo: {tamanho_maximo} caracteres"
+        dados_para_enviar = f"Modo de Operação: Modo seguro, Tamanho máximo: {tamanho_maximo} caracteres"
         
         socket_cliente.send(dados_para_enviar.encode())
         print(f"Cliente enviou: {dados_para_enviar}")
