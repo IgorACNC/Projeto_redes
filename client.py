@@ -23,6 +23,27 @@ def analisar_pacote(pacote_str):
         print(f"Erro ao analisar pacote: {e} - Pacote: {pacote_str}")
         return None, None
 
+def simular_erro_bits(pacote_bytes):
+    try:
+        pos_payload = pacote_bytes.rfind(b'PAYLOAD=') + len(b'PAYLOAD=')
+        if pos_payload == -1 + len(b'PAYLOAD='):
+             return pacote_bytes 
+
+        indice_corromper = random.randint(pos_payload, len(pacote_bytes) - 1)
+        
+        byte_original = pacote_bytes[indice_corromper]
+        novo_byte_int = (byte_original + 1) % 256 
+        
+        pacote_corrompido = bytearray(pacote_bytes)
+        pacote_corrompido[indice_corromper] = novo_byte_int
+        
+        print(f"*** ERRO SIMULADO: Bit corrompido no índice {indice_corromper} ***")
+        return bytes(pacote_corrompido)
+        
+    except Exception as e:
+        print(f"Erro ao simular corrupção: {e}")
+        return pacote_bytes
+
 def iniciar_cliente():
     host = input("Digite o IP do servidor (ou pressione Enter para 'localhost'): ")
     if not host:
@@ -105,12 +126,35 @@ def iniciar_cliente():
         timer_inicio = 0 
         buffer_recebimento = ""
 
+        pacotes_com_erro_simulado = set() 
+        
         while base < len(chunks):
             while prox_seq_num < base + JANELA_TAM and prox_seq_num < len(chunks):
                 pacote_bytes = todos_pacotes_preparados[prox_seq_num]
                 
-                print(f"Enviando [SEQ={prox_seq_num}]...")
-                socket_cliente.send(pacote_bytes)
+                simular_erro = 'n'
+                simular_perda = 'n'
+                
+                if prox_seq_num not in pacotes_com_erro_simulado: 
+                    socket_cliente.setblocking(True)
+                    simular_erro = input(f"Simular ERRO de bits no pacote {prox_seq_num}? (s/n): ").lower()
+                    if simular_erro != 's':
+                        simular_perda = input(f"Simular PERDA do pacote {prox_seq_num}? (s/n): ").lower()
+                    socket_cliente.setblocking(False) 
+                
+                if simular_erro == 's':
+                    print(f"Enviando [SEQ={prox_seq_num}] (COM ERRO SIMULADO)...")
+                    socket_cliente.send(simular_erro_bits(pacote_bytes))
+                    pacotes_com_erro_simulado.add(prox_seq_num)
+                
+                elif simular_perda == 's':
+                    print(f"Enviando [SEQ={prox_seq_num}] (SIMULANDO PERDA)...")
+                    
+                    pacotes_com_erro_simulado.add(prox_seq_num) 
+                
+                else:
+                    print(f"Enviando [SEQ={prox_seq_num}]...")
+                    socket_cliente.send(pacote_bytes)
                 
                 if base == prox_seq_num:
                     timer_inicio = time.time()
