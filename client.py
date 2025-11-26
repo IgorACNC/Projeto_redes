@@ -56,7 +56,6 @@ def iniciar_cliente():
         
         socket_cliente.setblocking(False)
 
-        # --- Seleção do Modo de Operação (Requisito do Trabalho) ---
         modo_escolhido = ""
         while True:
             try:
@@ -78,7 +77,6 @@ def iniciar_cliente():
             except ValueError:
                 pass
 
-        # --- Handshake ---
         tamanho_maximo_handshake = 0
         while True:
             try:
@@ -91,8 +89,7 @@ def iniciar_cliente():
                     print("Valor inválido. Mínimo 30.")
             except ValueError:
                 print("Digite um número.")
-        
-        # Envia o modo escolhido no handshake
+
         dados_handshake = f"Modo: {modo_escolhido}, Tamanho máximo: {tamanho_maximo_handshake} caracteres"
         
         socket_cliente.setblocking(True)
@@ -113,7 +110,6 @@ def iniciar_cliente():
             
         socket_cliente.setblocking(False) 
 
-        # --- Coleta da Mensagem ---
         mensagem_completa = ""
         while True:
             socket_cliente.setblocking(True)
@@ -131,7 +127,6 @@ def iniciar_cliente():
         chunks = [mensagem_completa[i:i + TAMANHO_PAYLOAD] for i in range(0, len(mensagem_completa), TAMANHO_PAYLOAD)]
         print(f"Mensagem fragmentada em {len(chunks)} pacotes.")
         
-        # Prepara pacotes
         todos_pacotes_preparados = {}
         for i, chunk in enumerate(chunks):
             payload_criptografado_bytes = criptografia.encrypt(chunk)
@@ -140,20 +135,19 @@ def iniciar_cliente():
             pacote_str = f"TIPO=MSG|SEQ={i}|CHECKSUM={checksum}|PAYLOAD={payload_b64_str}"
             todos_pacotes_preparados[i] = pacote_str.encode()
 
-        # --- Loop de Envio (Adapta-se ao Modo Escolhido) ---
         base = 0 
         prox_seq_num = 0 
         timer_inicio = 0 
         buffer_recebimento = ""
         pacotes_com_erro_simulado = set() 
-        acks_recebidos_sr = set() # Usado apenas no modo SR
+        acks_recebidos_sr = set() 
 
         print(f"\n--- Iniciando Transmissão em Modo {modo_escolhido} ---")
 
         while base < len(chunks):
-            # 1. Enviar pacotes dentro da janela
+            
             while prox_seq_num < base + JANELA_TAM and prox_seq_num < len(chunks):
-                # No SR, verificamos se o pacote já foi confirmado antes de retransmitir ou enviar
+                
                 if modo_escolhido == "SR" and prox_seq_num in acks_recebidos_sr:
                     prox_seq_num += 1
                     continue
@@ -187,7 +181,6 @@ def iniciar_cliente():
                 
                 prox_seq_num += 1
 
-            # 2. Receber ACKs
             try:
                 buffer_recebimento += socket_cliente.recv(1024).decode()
             except BlockingIOError:
@@ -211,7 +204,7 @@ def iniciar_cliente():
                     
                     if tipo_resp == "ACK":
                         if modo_escolhido == "GBN":
-                            # GBN: ACK cumulativo
+                            
                             print(f"[GBN] ACK cumulativo recebido para [SEQ={seq_resp}].")
                             base = max(base, seq_resp + 1)
                             if base == prox_seq_num:
@@ -220,32 +213,29 @@ def iniciar_cliente():
                                 timer_inicio = time.time() # Reinicia timer para o próximo da base
 
                         elif modo_escolhido == "SR":
-                            # SR: ACK individual
                             print(f"[SR] ACK individual recebido para [SEQ={seq_resp}].")
                             acks_recebidos_sr.add(seq_resp)
-                            # Avança a base apenas se o pacote da base já foi confirmado
+                        
                             while base in acks_recebidos_sr and base < len(chunks):
                                 base += 1
-                                timer_inicio = 0 # Para o timer do pacote antigo
+                                timer_inicio = 0 
                                 if base < prox_seq_num:
-                                    timer_inicio = time.time() # Inicia para o novo base se já enviado
+                                    timer_inicio = time.time()
 
                     elif tipo_resp == "NACK":
                         if modo_escolhido == "GBN":
                             print(f"!!! [GBN] NACK recebido para [SEQ={seq_resp}]. Retransmitindo janela...")
-                            prox_seq_num = base # Recua tudo
+                            prox_seq_num = base 
                             timer_inicio = 0 
                         elif modo_escolhido == "SR":
                             print(f"!!! [SR] NACK recebido para [SEQ={seq_resp}]. Retransmitindo APENAS este pacote...")
-                            # No SR, retransmitimos imediatamente o pacote com erro
-                            # Sem alterar o 'base' ou 'prox_seq_num' global drasticamente
                             socket_cliente.send(todos_pacotes_preparados[seq_resp])
 
                 except Exception as e:
                     print(f"Erro buffer: {e}")
                     buffer_recebimento = ""
 
-            # 3. Verificar Timeout
+            # Verificar Timeout
             if timer_inicio != 0 and (time.time() - timer_inicio) > TEMPO_LIMITE_SEGUNDOS:
                 if modo_escolhido == "GBN":
                     print(f"!!! [GBN] TEMPORIZADOR ESTOUROU para [BASE={base}]. Retransmitindo janela...")
@@ -260,7 +250,6 @@ def iniciar_cliente():
 
         print("\nTodos os pacotes de dados foram confirmados.")
         
-        # Encerramento (EOT)
         print("Enviando sinal de Fim de Transmissão (EOT)...")
         socket_cliente.setblocking(True) 
         eot_pacote = f"TIPO=EOT|SEQ={len(chunks)}|CHECKSUM=0|PAYLOAD=NULL"

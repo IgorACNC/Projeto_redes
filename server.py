@@ -33,13 +33,11 @@ def iniciar_servidor():
         with socket_cliente:
             print(f"Conexão estabelecida com {endereco_cliente}")
 
-            # --- Handshake ---
             dados_handshake = socket_cliente.recv(1024).decode()
             print(f"Dados de handshake recebidos: {dados_handshake}")
 
-            modo_operacao = "GBN" # Padrão
+            modo_operacao = "GBN" 
             try:
-                # O servidor lê o modo escolhido pelo cliente
                 tamanho_maximo = dados_handshake.split('Tamanho máximo: ')[1].split(' ')[0]
                 if "Modo: SR" in dados_handshake:
                     modo_operacao = "SR"
@@ -52,7 +50,6 @@ def iniciar_servidor():
 
             socket_cliente.send(resposta_handshake.encode())
             print(f"Handshake completo! Servidor enviou: {resposta_handshake}")
-            # --- Fim Handshake ---
 
             print(f"\nIniciando recepção de mensagens (Modo: {modo_operacao})...")
             
@@ -88,15 +85,11 @@ def iniciar_servidor():
                         # Verifica integridade
                         if checksum_calculado != checksum_recebido:
                             print(f"!!!!!!!!!!!!!!! [SEQ={seq}] ERRO DE CHECKSUM! Enviando NACK. !!!!!!!!!!!!!!!")
-                            # No SR e GBN, erro de checksum gera NACK
                             nack = f"TIPO=NACK|SEQ={seq}" if modo_operacao == "SR" else f"TIPO=NACK|SEQ={seq_esperado}"
                             socket_cliente.send(nack.encode())
                             continue
-
-                        # --- LÓGICA DE PROCESSAMENTO (GBN vs SR) ---
                         
                         if modo_operacao == "GBN":
-                            # No GBN, só aceita se for exatamente o esperado
                             if seq == seq_esperado:
                                 print(f"[GBN][SEQ={seq}] Pacote recebido NA ORDEM. Enviando ACK={seq}.")
                                 try:
