@@ -33,27 +33,39 @@ def iniciar_servidor():
         with socket_cliente:
             print(f"Conexão estabelecida com {endereco_cliente}")
 
+            # --- Handshake ---
             dados_handshake = socket_cliente.recv(1024).decode()
             print(f"Dados de handshake recebidos: {dados_handshake}")
 
+            modo_operacao = "GBN" # Padrão
             try:
+                # O servidor lê o modo escolhido pelo cliente
                 tamanho_maximo = dados_handshake.split('Tamanho máximo: ')[1].split(' ')[0]
-                resposta_handshake = f"Handshake OK. Modo: GBN. TamMax: {tamanho_maximo}. JANELA_TAM={TAMANHO_JANELA_SERVIDOR}"
+                if "Modo: SR" in dados_handshake:
+                    modo_operacao = "SR"
+                else:
+                    modo_operacao = "GBN"
+                
+                resposta_handshake = f"Handshake OK. Modo: {modo_operacao}. TamMax: {tamanho_maximo}. JANELA_TAM={TAMANHO_JANELA_SERVIDOR}"
             except IndexError:
                 resposta_handshake = "Erro: Formato de handshake inválido."
 
             socket_cliente.send(resposta_handshake.encode())
             print(f"Handshake completo! Servidor enviou: {resposta_handshake}")
+            # --- Fim Handshake ---
 
-            print("\nIniciando recepção de mensagens (Modo Go-Back-N)...")
+            print(f"\nIniciando recepção de mensagens (Modo: {modo_operacao})...")
+            
             mensagens_recebidas = {}
             seq_esperado = 0
+            buffer_sr = {} # Buffer exclusivo para Selective Repeat
             
             while True:
                 pacote_recebido = socket_cliente.recv(1024).decode()
                 if not pacote_recebido:
                     break 
 
+                # Tratamento de pacotes colados
                 pacotes = pacote_recebido.split('TIPO=')
                 for pacote_str in pacotes:
                     if not pacote_str:
@@ -64,7 +76,7 @@ def iniciar_servidor():
                         continue
 
                     if tipo == "MSG":
-                        
+                        # Decodifica Base64 e calcula Checksum
                         try:
                             payload_bytes = base64.b64decode(payload_b64)
                         except Exception as e:
@@ -72,9 +84,21 @@ def iniciar_servidor():
                             continue
 
                         checksum_calculado = calcular_checksum(payload_bytes)
-                        if seq == seq_esperado:
-                            if checksum_calculado == checksum_recebido:
-                                print(f"[SEQ={seq}] Pacote recebido NA ORDEM. Enviando ACK={seq}.")
+                        
+                        # Verifica integridade
+                        if checksum_calculado != checksum_recebido:
+                            print(f"!!!!!!!!!!!!!!! [SEQ={seq}] ERRO DE CHECKSUM! Enviando NACK. !!!!!!!!!!!!!!!")
+                            # No SR e GBN, erro de checksum gera NACK
+                            nack = f"TIPO=NACK|SEQ={seq}" if modo_operacao == "SR" else f"TIPO=NACK|SEQ={seq_esperado}"
+                            socket_cliente.send(nack.encode())
+                            continue
+
+                        # --- LÓGICA DE PROCESSAMENTO (GBN vs SR) ---
+                        
+                        if modo_operacao == "GBN":
+                            # No GBN, só aceita se for exatamente o esperado
+                            if seq == seq_esperado:
+                                print(f"[GBN][SEQ={seq}] Pacote recebido NA ORDEM. Enviando ACK={seq}.")
                                 try:
                                     payload_descriptografado = criptografia.decrypt(payload_bytes)
                                     mensagens_recebidas[seq] = payload_descriptografado
@@ -84,16 +108,41 @@ def iniciar_servidor():
                                 ack = f"TIPO=ACK|SEQ={seq_esperado}"
                                 socket_cliente.send(ack.encode())
                                 seq_esperado += 1
-                            
                             else:
-                                print(f"!!!!!!!!!!!!!!! [SEQ={seq}] ERRO DE CHECKSUM! Enviando NACK. !!!!!!!!!!!!!!!")
-                                nack = f"TIPO=NACK|SEQ={seq_esperado}"
-                                socket_cliente.send(nack.encode())
-                        
-                        else:
-                            print(f"[SEQ={seq}] Pacote FORA DE ORDEM (Esperando {seq_esperado}). Descartando.")
-                            ack_anterior = f"TIPO=ACK|SEQ={seq_esperado - 1}"
-                            socket_cliente.send(ack_anterior.encode())
+                                print(f"[GBN][SEQ={seq}] Pacote FORA DE ORDEM (Esperando {seq_esperado}). Descartando.")
+                                ack_anterior = f"TIPO=ACK|SEQ={seq_esperado - 1}"
+                                socket_cliente.send(ack_anterior.encode())
+
+                        elif modo_operacao == "SR":
+                            # No SR, aceita pacotes fora de ordem (dentro da janela)
+                            print(f"[SR][SEQ={seq}] Pacote recebido com integridade.")
+                            
+                            # Envia ACK individual para o pacote recebido
+                            ack = f"TIPO=ACK|SEQ={seq}"
+                            socket_cliente.send(ack.encode())
+
+                            payload_desc = ""
+                            try:
+                                payload_desc = criptografia.decrypt(payload_bytes)
+                            except:
+                                payload_desc = "ERRO"
+
+                            if seq == seq_esperado:
+                                print(f"[SR] Pacote {seq} é o esperado. Processando...")
+                                mensagens_recebidas[seq] = payload_desc
+                                seq_esperado += 1
+                                
+                                # Verifica se há pacotes consecutivos já no buffer
+                                while seq_esperado in buffer_sr:
+                                    print(f"[SR] Processando pacote {seq_esperado} do buffer.")
+                                    mensagens_recebidas[seq_esperado] = buffer_sr.pop(seq_esperado)
+                                    seq_esperado += 1
+                            
+                            elif seq > seq_esperado:
+                                print(f"[SR] Pacote {seq} fora de ordem (adiantado). Guardando no buffer.")
+                                buffer_sr[seq] = payload_desc
+                            
+                            # Se seq < seq_esperado, é duplicata, já enviamos o ACK acima.
 
                     elif tipo == "EOT":
                         print(f"\n[SEQ={seq}] Recebido sinal de Fim de Transmissão (EOT).")
